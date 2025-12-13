@@ -367,6 +367,27 @@
       </article>
     </section>
 
+    <section class="summary-grid">
+      <article class="card metric">
+        <p class="label">Calls scheduled (week)</p>
+        <p class="value" id="scheduledWeekCalls">--</p>
+        <p class="muted" id="scheduledTotalCalls">-- total scheduled</p>
+      </article>
+
+      <article class="card metric">
+        <p class="label">Calls completed (week)</p>
+        <p class="value" id="completedWeekCalls">--</p>
+        <p class="muted" id="completedTotalCalls">-- total completed</p>
+      </article>
+
+      <article class="card metric">
+        <p class="label">Completion rate (week)</p>
+        <p class="value" id="weekCompletionRate">--</p>
+        <p class="muted" id="totalCompletionRate">-- overall</p>
+      </article>
+    </section>
+
+
     <section class="panel">
       <div class="panel-head">
         <div>
@@ -406,23 +427,82 @@
     </section>
   </main>
 
+  <section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="label muted-sm">Team view</p>
+      <h2>Calls (scheduled vs completed)</h2>
+    </div>
+    <div class="controls">
+      <input type="search" id="callsSearchInput" placeholder="Search names">
+    </div>
+  </div>
+  <div class="chart-area">
+    <canvas id="callsChart" height="220"></canvas>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="label muted-sm">Details</p>
+      <h2>Calls breakdown</h2>
+    </div>
+    <div class="chip" id="callsDataSourceLabel">Google Sheets</div>
+  </div>
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Scheduled (Week)</th>
+          <th>Completed (Week)</th>
+          <th>Scheduled (Total)</th>
+          <th>Completed (Total)</th>
+          <th>Completion (Week)</th>
+        </tr>
+      </thead>
+      <tbody id="callsBody"></tbody>
+    </table>
+  </div>
+</section>
+
+
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
-    // Keep your sheet settings here; these have been populated with your values.
+    // One spreadsheet, two tabs.
     const CONFIG = {
       sheetId: "1Bao7YKsLpnGxYQV98lCQ5gsfkxfSwPTQFPKv9iMj1AQ",
-      sheetName: "Reachout Tracker",
-      range: "A:I",
-      apiKey: "AIzaSyD1bksReNcdlng7sYjA54KAi89xlpBQJro"
+      apiKey: "AIzaSyD1bksReNcdlng7sYjA54KAi89xlpBQJro",
+      reachouts: { sheetName: "Reachout Tracker", range: "A:I" },
+      calls: { sheetName: "Scheduled Tracker", range: "A:K" } // screenshot shows Total in col K (with a blank col J)
     };
 
-    // Fallback sample in case the sheet can't be reached.
+    // Fallback samples in case the sheet can't be reached.
     const SAMPLE_MATRIX = [
       { name: "total", andy: 8, daniel: 3, emily: 5, patrick: 2, jordan: 1, justin: 4, olivia: 2, bodhi: 1, total: 26 },
       { name: "this week", andy: 1, daniel: 1, emily: 0, patrick: 0, jordan: 0, justin: 1, olivia: 0, bodhi: 0, total: 3 }
     ];
 
+    const SAMPLE_CALLS_MATRIX = [
+      { name: "Scheduled", andy: 2, daniel: 2, emily: 0, patrick: 0, jordan: 0, justin: 0, olivia: 4, bodhi: 0, total: 8 },
+      { name: "This Week", andy: 0, daniel: 0, emily: 0, patrick: 0, jordan: 0, justin: 0, olivia: 0, bodhi: 0, total: 0 },
+      { name: "Completed", andy: 1, daniel: 3, emily: 2, patrick: 0, jordan: 1, justin: 2, olivia: 0, bodhi: 0, total: 9 },
+      { name: "This Week", andy: 0, daniel: 0, emily: 0, patrick: 0, jordan: 0, justin: 0, olivia: 0, bodhi: 0, total: 0 },
+      { name: "TOTAL", andy: 3, daniel: 5, emily: 2, patrick: 0, jordan: 1, justin: 2, olivia: 4, bodhi: 0, total: 17 },
+      { name: "TOTAL THIS WEEK", andy: 0, daniel: 0, emily: 0, patrick: 0, jordan: 0, justin: 0, olivia: 0, bodhi: 0, total: 0 }
+    ];
+
+    // Reachouts state (existing).
     const state = { people: [], filtered: [], chart: null, totals: { all: 0, week: 0 } };
+
+    // Calls state (new).
+    const callsState = {
+      people: [],
+      filtered: [],
+      chart: null,
+      totals: { scheduledAll: 0, scheduledWeek: 0, completedAll: 0, completedWeek: 0 }
+    };
 
     document.addEventListener("DOMContentLoaded", () => {
       setupControls();
@@ -431,38 +511,63 @@
 
     function setupControls() {
       document.getElementById("refreshBtn").addEventListener("click", () => loadData(true));
+
       const search = document.getElementById("searchInput");
       if (search) search.addEventListener("input", debounce(applyFilters, 120));
+
+      const callsSearch = document.getElementById("callsSearchInput");
+      if (callsSearch) callsSearch.addEventListener("input", debounce(applyCallFilters, 120));
     }
 
     async function loadData(manual = false) {
       setSyncState("loading", manual ? "Refreshing..." : "Loading from Sheets...");
       toggleRefresh(true);
+
+      let reachoutsFallback = false;
+      let callsFallback = false;
+
       try {
-        const rows = await fetchSheetData();
-        handleRows(rows, false);
-        setSyncState("live", "Live from Google Sheets");
-      } catch (error) {
-        console.warn("Falling back to sample data:", error);
+        const reachoutRows = await fetchSheetData(CONFIG.reachouts.sheetName, CONFIG.reachouts.range);
+        handleRows(reachoutRows, false);
+      } catch (e) {
+        console.warn("Reachouts: falling back to sample:", e);
         handleRows(SAMPLE_MATRIX, true);
-        setSyncState("fallback", "Sample data (update sheet ID)");
-      } finally {
-        toggleRefresh(false);
+        reachoutsFallback = true;
       }
+
+      try {
+        const callsRows = await fetchSheetData(CONFIG.calls.sheetName, CONFIG.calls.range);
+        handleCallRows(callsRows, false);
+      } catch (e) {
+        console.warn("Calls: falling back to sample:", e);
+        handleCallRows(SAMPLE_CALLS_MATRIX, true);
+        callsFallback = true;
+      }
+
+      if (!reachoutsFallback && !callsFallback) {
+        setSyncState("live", "Live from Google Sheets");
+      } else if (reachoutsFallback && callsFallback) {
+        setSyncState("fallback", "Sample data (check sheet access)");
+      } else {
+        setSyncState("fallback", `Partial fallback (${reachoutsFallback ? "reachouts" : "calls"})`);
+      }
+
+      toggleRefresh(false);
     }
 
-    async function fetchSheetData() {
+    async function fetchSheetData(sheetName, range) {
       if (!CONFIG.sheetId || CONFIG.sheetId === "YOUR_SHEET_ID") {
         throw new Error("Add your sheetId in CONFIG.");
       }
       if (CONFIG.apiKey && CONFIG.apiKey !== "YOUR_API_KEY") {
-        return fetchViaApi();
+        return fetchViaApi(sheetName, range);
       }
-      return fetchViaGviz();
+      return fetchViaGviz(sheetName, range);
     }
 
-    async function fetchViaApi() {
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.sheetId}/values/${encodeURIComponent(CONFIG.sheetName + "!" + CONFIG.range)}?key=${CONFIG.apiKey}`;
+    async function fetchViaApi(sheetName, range) {
+      const a1 = `${sheetName}!${range}`;
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.sheetId}/values/${encodeURIComponent(a1)}?key=${CONFIG.apiKey}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error("Sheets API request failed");
       const json = await res.json();
@@ -471,8 +576,8 @@
       return toObjects(rows, headers);
     }
 
-    async function fetchViaGviz() {
-      const url = `https://docs.google.com/spreadsheets/d/${CONFIG.sheetId}/gviz/tq?sheet=${encodeURIComponent(CONFIG.sheetName)}&range=${encodeURIComponent(CONFIG.range)}`;
+    async function fetchViaGviz(sheetName, range) {
+      const url = `https://docs.google.com/spreadsheets/d/${CONFIG.sheetId}/gviz/tq?sheet=${encodeURIComponent(sheetName)}&range=${encodeURIComponent(range)}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error("Could not reach Google Sheets");
       const text = await res.text();
@@ -505,6 +610,7 @@
       });
     }
 
+    // --------- REACHOUTS (existing behavior) ---------
     function handleRows(rows, isFallback) {
       const parsed = parseMatrixRows(rows);
       state.people = parsed.people;
@@ -518,10 +624,17 @@
       const normalized = normalizeRows(rows || []);
       if (!normalized.length) return { people: [], totalAll: 0, totalWeek: 0 };
 
-      const totalRow = normalized.find((r) => includesText(r.name, "total")) || normalized[0];
-      const weekRow = normalized.find((r) => includesText(r.name, "week"));
+      // Prefer a “total” row that is NOT “total this week”
+      const totalRow =
+        normalized.find((r) => includesText(r.name, "total") && !includesText(r.name, "this week")) || normalized[0];
+
+      // Prefer “this week” row (not total)
+      const weekRow =
+        normalized.find((r) => includesText(r.name, "this week")) ||
+        normalized.find((r) => includesText(r.name, "week") && !includesText(r.name, "total"));
+
       const headerKeys = Object.keys(normalized[0]).filter((key) => key !== "name");
-      const peopleKeys = headerKeys.filter((key) => key !== "total");
+      const peopleKeys = headerKeys.filter((key) => key !== "total" && !/^col\d+$/i.test(key));
 
       const people = peopleKeys.map((key) => ({
         key,
@@ -573,60 +686,37 @@
     function renderChart() {
       const canvas = document.getElementById("teamChart");
       if (!canvas) return;
+
       const data = state.filtered;
       if (!data.length) {
         if (state.chart) state.chart.destroy();
         return;
       }
+
       const labels = data.map((p) => p.name);
       const totals = data.map((p) => p.total);
       const weeks = data.map((p) => p.week);
 
       const context = canvas.getContext("2d");
       if (state.chart) state.chart.destroy();
+
       state.chart = new Chart(context, {
         type: "bar",
         data: {
           labels,
           datasets: [
-            {
-              label: "Total",
-              data: totals,
-              backgroundColor: "rgba(94, 123, 255, 0.7)",
-              borderRadius: 8
-            },
-            {
-              label: "This Week",
-              data: weeks,
-              backgroundColor: "rgba(124, 231, 255, 0.7)",
-              borderRadius: 8
-            }
+            { label: "Total", data: totals, backgroundColor: "rgba(94, 123, 255, 0.7)", borderRadius: 8 },
+            { label: "This Week", data: weeks, backgroundColor: "rgba(124, 231, 255, 0.7)", borderRadius: 8 }
           ]
         },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { labels: { color: "#e8edf7" } }
-          },
-          scales: {
-            x: {
-              ticks: { color: "#9eb0c9" },
-              grid: { display: false }
-            },
-            y: {
-              beginAtZero: true,
-              ticks: { color: "#9eb0c9" },
-              grid: { color: "rgba(255, 255, 255, 0.08)" }
-            }
-          }
-        }
+        options: chartOptions()
       });
     }
 
     function renderTable() {
       const body = document.getElementById("peopleBody");
       body.innerHTML = "";
+
       if (!state.filtered.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
@@ -649,6 +739,161 @@
         appendCell(tr, totalAll ? `${share}%` : "-");
         body.appendChild(tr);
       });
+    }
+
+    // --------- CALLS (new) ---------
+    function handleCallRows(rows, isFallback) {
+      const parsed = parseScheduledTrackerRows(rows);
+      callsState.people = parsed.people;
+      callsState.filtered = parsed.people;
+      callsState.totals = parsed.totals;
+
+      const label = document.getElementById("callsDataSourceLabel");
+      if (label) label.textContent = isFallback ? "Sample data (edit CONFIG)" : "Live: Google Sheets";
+
+      applyCallFilters();
+    }
+
+    function parseScheduledTrackerRows(rows) {
+      const normalized = normalizeRows(rows || []);
+      if (!normalized.length) {
+        return { people: [], totals: { scheduledAll: 0, scheduledWeek: 0, completedAll: 0, completedWeek: 0 } };
+      }
+
+      const idxScheduled = normalized.findIndex((r) => includesText(r.name, "scheduled"));
+      const idxCompleted = normalized.findIndex((r) => includesText(r.name, "completed"));
+
+      const scheduledRow = idxScheduled >= 0 ? normalized[idxScheduled] : null;
+      const scheduledWeekRow =
+        idxScheduled >= 0 && normalized[idxScheduled + 1] && includesText(normalized[idxScheduled + 1].name, "week")
+          ? normalized[idxScheduled + 1]
+          : normalized.find((r, i) => i > idxScheduled && includesText(r.name, "week"));
+
+      const completedRow = idxCompleted >= 0 ? normalized[idxCompleted] : null;
+      const completedWeekRow =
+        idxCompleted >= 0 && normalized[idxCompleted + 1] && includesText(normalized[idxCompleted + 1].name, "week")
+          ? normalized[idxCompleted + 1]
+          : normalized.find((r, i) => i > idxCompleted && includesText(r.name, "week"));
+
+      const headerKeys = Object.keys(normalized[0]).filter((key) => key !== "name");
+      const peopleKeys = headerKeys.filter((key) => key !== "total" && !/^col\d+$/i.test(key));
+
+      const people = peopleKeys.map((key) => ({
+        key,
+        name: formatName(key),
+        scheduledTotal: toNumber(scheduledRow ? scheduledRow[key] : 0),
+        scheduledWeek: toNumber(scheduledWeekRow ? scheduledWeekRow[key] : 0),
+        completedTotal: toNumber(completedRow ? completedRow[key] : 0),
+        completedWeek: toNumber(completedWeekRow ? completedWeekRow[key] : 0)
+      }));
+
+      const totals = {
+        scheduledAll: toNumber(scheduledRow?.total) || sum(people.map((p) => p.scheduledTotal)),
+        scheduledWeek: toNumber(scheduledWeekRow?.total) || sum(people.map((p) => p.scheduledWeek)),
+        completedAll: toNumber(completedRow?.total) || sum(people.map((p) => p.completedTotal)),
+        completedWeek: toNumber(completedWeekRow?.total) || sum(people.map((p) => p.completedWeek))
+      };
+
+      return { people, totals };
+    }
+
+    function applyCallFilters() {
+      const input = document.getElementById("callsSearchInput");
+      const query = input ? input.value.trim().toLowerCase() : "";
+      callsState.filtered = query ? callsState.people.filter((p) => p.name.toLowerCase().includes(query)) : callsState.people;
+
+      renderCallsSummary();
+      renderCallsChart();
+      renderCallsTable();
+    }
+
+    function renderCallsSummary() {
+      const t = callsState.totals || { scheduledAll: 0, scheduledWeek: 0, completedAll: 0, completedWeek: 0 };
+
+      setText("scheduledWeekCalls", formatNumber(t.scheduledWeek));
+      setText("scheduledTotalCalls", `${formatNumber(t.scheduledAll)} total scheduled`);
+
+      setText("completedWeekCalls", formatNumber(t.completedWeek));
+      setText("completedTotalCalls", `${formatNumber(t.completedAll)} total completed`);
+
+      const weekRate = t.scheduledWeek > 0 ? Math.round((t.completedWeek / t.scheduledWeek) * 100) : null;
+      setText("weekCompletionRate", weekRate === null ? "--" : `${weekRate}%`);
+
+      const totalRate = t.scheduledAll > 0 ? Math.round((t.completedAll / t.scheduledAll) * 100) : null;
+      setText("totalCompletionRate", totalRate === null ? "-- overall" : `${totalRate}% overall`);
+    }
+
+    function renderCallsChart() {
+      const canvas = document.getElementById("callsChart");
+      if (!canvas) return;
+
+      const data = callsState.filtered;
+      if (!data.length) {
+        if (callsState.chart) callsState.chart.destroy();
+        return;
+      }
+
+      const labels = data.map((p) => p.name);
+      const scheduled = data.map((p) => p.scheduledWeek);
+      const completed = data.map((p) => p.completedWeek);
+
+      const ctx = canvas.getContext("2d");
+      if (callsState.chart) callsState.chart.destroy();
+
+      callsState.chart = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [
+            { label: "Scheduled (Week)", data: scheduled, backgroundColor: "rgba(94, 123, 255, 0.7)", borderRadius: 8 },
+            { label: "Completed (Week)", data: completed, backgroundColor: "rgba(124, 240, 182, 0.7)", borderRadius: 8 }
+          ]
+        },
+        options: chartOptions()
+      });
+    }
+
+    function renderCallsTable() {
+      const body = document.getElementById("callsBody");
+      if (!body) return;
+
+      body.innerHTML = "";
+
+      if (!callsState.filtered.length) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 6;
+        td.className = "empty";
+        td.textContent = "No people match your filter yet.";
+        tr.appendChild(td);
+        body.appendChild(tr);
+        return;
+      }
+
+      callsState.filtered.forEach((p) => {
+        const tr = document.createElement("tr");
+        appendCell(tr, p.name);
+        appendCell(tr, formatNumber(p.scheduledWeek));
+        appendCell(tr, formatNumber(p.completedWeek));
+        appendCell(tr, formatNumber(p.scheduledTotal));
+        appendCell(tr, formatNumber(p.completedTotal));
+        const rate = p.scheduledWeek > 0 ? `${Math.round((p.completedWeek / p.scheduledWeek) * 100)}%` : "-";
+        appendCell(tr, rate);
+        body.appendChild(tr);
+      });
+    }
+
+    // --------- Shared UI helpers ---------
+    function chartOptions() {
+      return {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: "#e8edf7" } } },
+        scales: {
+          x: { ticks: { color: "#9eb0c9" }, grid: { display: false } },
+          y: { beginAtZero: true, ticks: { color: "#9eb0c9" }, grid: { color: "rgba(255, 255, 255, 0.08)" } }
+        }
+      };
     }
 
     function setSyncState(status, label) {
