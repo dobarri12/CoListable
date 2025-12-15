@@ -820,24 +820,15 @@
       const outreachWeek = state?.totals?.week || 0;
       const outreachAll  = state?.totals?.all  || 0;
 
-      const schedConvWeek = outreachWeek > 0 ? Math.round((t.scheduledWeek / outreachWeek) * 100) : null;
-      const compConvWeek  = outreachWeek > 0 ? Math.round((t.completedWeek / outreachWeek) * 100) : null;
+      const schedConvAll  = outreachAll  > 0 ? Math.round((t.scheduledAll / outreachAll) * 100).toFixed(2) : null;
+      const compConvAll   = outreachAll  > 0 ? Math.round((t.completedAll / outreachAll) * 100).toFixed(2) : null;
 
-      const schedConvAll  = outreachAll  > 0 ? Math.round((t.scheduledAll / outreachAll) * 100) : null;
-      const compConvAll   = outreachAll  > 0 ? Math.round((t.completedAll / outreachAll) * 100) : null;
-
-      setText(
-        "conversionRateWeek",
-        (schedConvWeek === null && compConvWeek === null)
-          ? "--"
-          : `S ${schedConvWeek ?? 0}% | C ${compConvWeek ?? 0}%`
-      );
 
       setText(
         "conversionRateTotal",
         (schedConvAll === null && compConvAll === null)
           ? "-- overall"
-          : `Overall: S ${schedConvAll ?? 0}% | C ${compConvAll ?? 0}%`
+          : `Overall: Scheduled ${schedConvAll ?? 0}% | Completed ${compConvAll ?? 0}%`
       );
 
     }
