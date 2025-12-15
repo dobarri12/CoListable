@@ -381,10 +381,11 @@
       </article>
 
       <article class="card metric">
-        <p class="label">Completion rate (week)</p>
-        <p class="value" id="weekCompletionRate">--</p>
-        <p class="muted" id="totalCompletionRate">-- overall</p>
+        <p class="label">Conversion rate (vs outreach)</p>
+        <p class="value" id="conversionRateWeek">--</p>
+        <p class="muted" id="conversionRateTotal">-- overall</p>
       </article>
+
     </section>
 
 
@@ -816,11 +817,29 @@
       setText("completedWeekCalls", formatNumber(t.completedWeek));
       setText("completedTotalCalls", `${formatNumber(t.completedAll)} total completed`);
 
-      const weekRate = t.scheduledWeek > 0 ? Math.round((t.completedWeek / t.scheduledWeek) * 100) : null;
-      setText("weekCompletionRate", weekRate === null ? "--" : `${weekRate}%`);
+      const outreachWeek = state?.totals?.week || 0;
+      const outreachAll  = state?.totals?.all  || 0;
 
-      const totalRate = t.scheduledAll > 0 ? Math.round((t.completedAll / t.scheduledAll) * 100) : null;
-      setText("totalCompletionRate", totalRate === null ? "-- overall" : `${totalRate}% overall`);
+      const schedConvWeek = outreachWeek > 0 ? Math.round((t.scheduledWeek / outreachWeek) * 100) : null;
+      const compConvWeek  = outreachWeek > 0 ? Math.round((t.completedWeek / outreachWeek) * 100) : null;
+
+      const schedConvAll  = outreachAll  > 0 ? Math.round((t.scheduledAll / outreachAll) * 100) : null;
+      const compConvAll   = outreachAll  > 0 ? Math.round((t.completedAll / outreachAll) * 100) : null;
+
+      setText(
+        "conversionRateWeek",
+        (schedConvWeek === null && compConvWeek === null)
+          ? "--"
+          : `S ${schedConvWeek ?? 0}% | C ${compConvWeek ?? 0}%`
+      );
+
+      setText(
+        "conversionRateTotal",
+        (schedConvAll === null && compConvAll === null)
+          ? "-- overall"
+          : `Overall: S ${schedConvAll ?? 0}% | C ${compConvAll ?? 0}%`
+      );
+
     }
 
     function renderCallsChart() {
